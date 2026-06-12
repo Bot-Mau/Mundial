@@ -54,6 +54,11 @@
   .sync{display:inline-block;margin-left:10px;font-size:12px;font-weight:700;color:var(--muted);vertical-align:middle}
   .sync.on{color:var(--win)}
   .sync.off{color:var(--lose)}
+  .editbtn{margin-left:10px;vertical-align:middle;appearance:none;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-family:inherit;font-weight:700;font-size:12.5px;padding:8px 13px;border-radius:10px;cursor:pointer}
+  .editbtn:hover{color:var(--text);border-color:rgba(255,255,255,.28)}
+  .editbtn.on{background:rgba(22,199,132,.14);border-color:var(--win);color:#7ef0c0}
+  body:not(.can-edit) .score{opacity:.5;cursor:not-allowed;background:rgba(255,255,255,.03)}
+  body:not(.can-edit) .score:focus{outline:none;border-color:var(--line)}
 
   .section-head{display:flex;align-items:center;gap:12px;margin:30px 0 14px;flex-wrap:wrap}
   .badge{font-family:'Bebas Neue',sans-serif;font-size:26px;line-height:1;width:46px;height:46px;display:grid;place-items:center;border-radius:12px;color:#0a0f24;font-weight:400}
@@ -145,7 +150,7 @@
   <header class="top">
     <div class="eyebrow">Boletos · Fase de grupos</div>
     <h1>Quiniela Mundial 2026</h1>
-    <p class="sub">Los 72 partidos de la fase de grupos, cada selección con su dueño. Captura el marcador de cada juego y la tabla calcula el récord de cada jugador. El arranque: <strong>México (Tania) vs Sudáfrica (Mau)</strong>, 11 de junio en el Azteca.</p>
+    <p class="sub">Los 72 partidos de la fase de grupos, cada selección con su dueño y los marcadores en vivo. La tabla calcula el récord de cada jugador. El arranque: <strong>México (Tania) vs Sudáfrica (Mau)</strong>, 11 de junio en el Azteca.</p>
     <div class="stats">
       <div class="stat"><div class="n">72</div><div class="l">Partidos</div></div>
       <div class="stat"><div class="n">12</div><div class="l">Grupos</div></div>
@@ -165,6 +170,7 @@
       <label class="filterlbl" for="psel">Resaltar jugador</label>
       <select class="pselect" id="psel"><option value="">Todos los jugadores</option></select>
       <span class="sync" id="syncstatus">● Conectando…</span>
+      <button class="editbtn" id="editbtn">🔒 Organizador</button>
     </div>
   </div>
 
@@ -173,7 +179,7 @@
   <footer>
     Repechajes resueltos en marzo 2026: Chequia (Grupo A), Bosnia (B), Turquía (D) y Suecia (F) por UEFA; RD Congo (K) e Irak (I) por el repechaje intercontinental.
     Único duelo entre selecciones del mismo dueño: <strong>Haití vs Escocia</strong> (ambas de Alex A), Grupo C.
-    Los marcadores se sincronizan en vivo entre todos los que abran la página.
+    Los marcadores se sincronizan en vivo entre todos; solo el organizador (con PIN) puede capturarlos.
   </footer>
 </div>
 
@@ -287,6 +293,17 @@ let person = null;
 let results = {};
 try{ results = JSON.parse(localStorage.getItem('qm2026')||'{}'); }catch(e){ results = {}; }
 function saveResults(){ try{ localStorage.setItem('qm2026', JSON.stringify(results)); }catch(e){} }
+
+// ===== Modo organizador (PIN) — controla quién puede capturar =====
+const EDIT_PIN = "6202";          // <-- cambia este PIN por el que quieras
+let canEdit = false;
+try{ canEdit = sessionStorage.getItem('qm2026_edit')==='1'; }catch(e){}
+function applyEditMode(){
+  document.body.classList.toggle('can-edit', canEdit);
+  content.querySelectorAll('.score').forEach(inp=> inp.readOnly = !canEdit);
+  const btn=document.getElementById('editbtn');
+  if(btn){ btn.textContent = canEdit ? '🔓 Editando · salir' : '🔒 Organizador'; btn.classList.toggle('on', canEdit); }
+}
 
 // estos se reasignan cuando Firebase carga; si no carga, quedan en modo local
 let fbWrite = ()=>{};
@@ -448,10 +465,10 @@ function renderTabla(){
   }).join('');
   content.innerHTML = `
     <div class="section-head"><div class="badge" style="background:linear-gradient(135deg,var(--gold),var(--pink));color:#0a0f24">★</div><h2>Tabla de jugadores</h2></div>
-    <p class="tblnote"><span>${played} de 72 partidos con marcador. Puntos: 3 por victoria, 1 por empate. Cuenta los resultados de todas las selecciones de cada jugador.</span><button class="ghostbtn" id="reset">Borrar resultados</button></p>
+    <p class="tblnote"><span>${played} de 72 partidos con marcador. Puntos: 3 por victoria, 1 por empate. Cuenta los resultados de todas las selecciones de cada jugador.</span>${canEdit?'<button class="ghostbtn" id="reset">Borrar resultados</button>':''}</p>
     <div class="tblwrap"><table class="tbl"><thead><tr><th>#</th><th class="name">Jugador</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>GF:GC</th><th>DG</th><th>Pts</th></tr></thead><tbody>${body}</tbody></table></div>`;
   const rb=document.getElementById('reset');
-  rb.onclick=()=>{ if(confirm('¿Borrar TODOS los marcadores para todos los jugadores?')){ results={}; saveResults(); if(fbClear) fbClear(); render(); } };
+  if(rb) rb.onclick=()=>{ if(confirm('¿Borrar TODOS los marcadores para todos los jugadores?')){ results={}; saveResults(); if(fbClear) fbClear(); render(); } };
 }
 
 function render(){
@@ -460,11 +477,13 @@ function render(){
   else if(view==='dia') renderDia();
   else if(view==='persona') renderPersona();
   else renderTabla();
+  applyEditMode();
 }
 
 // score input handling (delegated, no re-render so focus stays)
 content.addEventListener('input', e=>{
   const inp = e.target.closest('.score'); if(!inp) return;
+  if(!canEdit){ inp.blur(); return; }
   const card = inp.closest('.card'); const i = card.dataset.i;
   const a = card.querySelector('.score[data-s="a"]').value;
   const b = card.querySelector('.score[data-s="b"]').value;
@@ -479,6 +498,15 @@ content.addEventListener('input', e=>{
 const psel=document.getElementById('psel');
 people.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; psel.appendChild(o); });
 psel.addEventListener('change', ()=>{ person = psel.value || null; render(); });
+
+// organizer (PIN) button
+document.getElementById('editbtn').addEventListener('click', ()=>{
+  if(canEdit){ canEdit=false; try{sessionStorage.removeItem('qm2026_edit');}catch(e){} applyEditMode(); return; }
+  const v = prompt('PIN de organizador para capturar marcadores:');
+  if(v===null) return;
+  if(v===EDIT_PIN){ canEdit=true; try{sessionStorage.setItem('qm2026_edit','1');}catch(e){} applyEditMode(); }
+  else alert('PIN incorrecto.');
+});
 
 // tabs
 document.getElementById('viewtabs').addEventListener('click',e=>{
