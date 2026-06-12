@@ -47,6 +47,13 @@
   .chip:hover{border-color:rgba(255,255,255,.28);color:var(--text)}
   .chip.active{background:var(--gold);border-color:var(--gold);color:#1a1300;font-weight:800}
   .chip.reset.active{background:var(--surface2);border-color:var(--line);color:var(--text)}
+  .pselect{appearance:none;-webkit-appearance:none;width:100%;max-width:380px;background:var(--surface);border:1px solid var(--line);color:var(--text);font-family:inherit;font-weight:700;font-size:14.5px;padding:12px 40px 12px 14px;border-radius:12px;cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2397a0c9' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
+  .pselect:focus{outline:2px solid var(--pink);border-color:var(--pink)}
+  .pselect option{background:var(--ink2);color:var(--text);font-weight:600}
+  .sync{display:inline-block;margin-left:10px;font-size:12px;font-weight:700;color:var(--muted);vertical-align:middle}
+  .sync.on{color:var(--win)}
+  .sync.off{color:var(--lose)}
 
   .section-head{display:flex;align-items:center;gap:12px;margin:30px 0 14px;flex-wrap:wrap}
   .badge{font-family:'Bebas Neue',sans-serif;font-size:26px;line-height:1;width:46px;height:46px;display:grid;place-items:center;border-radius:12px;color:#0a0f24;font-weight:400}
@@ -155,8 +162,9 @@
       <button data-view="tabla">Tabla</button>
     </div>
     <div class="filterbar">
-      <div class="filterlbl">Resaltar jugador</div>
-      <div class="chips" id="chips"></div>
+      <label class="filterlbl" for="psel">Resaltar jugador</label>
+      <select class="pselect" id="psel"><option value="">Todos los jugadores</option></select>
+      <span class="sync" id="syncstatus">● Conectando…</span>
     </div>
   </div>
 
@@ -165,11 +173,22 @@
   <footer>
     Repechajes resueltos en marzo 2026: Chequia (Grupo A), Bosnia (B), Turquía (D) y Suecia (F) por UEFA; RD Congo (K) e Irak (I) por el repechaje intercontinental.
     Único duelo entre selecciones del mismo dueño: <strong>Haití vs Escocia</strong> (ambas de Alex A), Grupo C.
-    Los marcadores se guardan en este navegador (no se comparten entre dispositivos).
+    Los marcadores se sincronizan en vivo entre todos los que abran la página.
   </footer>
 </div>
 
-<script>
+<script type="module">
+// ===== Firebase (sincroniza marcadores en vivo entre todos) =====
+const firebaseConfig = {
+  apiKey: "AIzaSyBEqzaMmLAKql48T9t6FwN8HZUlzyStHVI",
+  authDomain: "quiniela-mundial-2026-698b3.firebaseapp.com",
+  databaseURL: "https://quiniela-mundial-2026-698b3-default-rtdb.firebaseio.com",
+  projectId: "quiniela-mundial-2026-698b3",
+  storageBucket: "quiniela-mundial-2026-698b3.firebasestorage.app",
+  messagingSenderId: "1092984078344",
+  appId: "1:1092984078344:web:6772656669ef27619511bd"
+};
+
 const GC = {A:'#ff2d78',B:'#fb923c',C:'#fbbf24',D:'#a3e635',E:'#34d399',F:'#22d3ee',G:'#38bdf8',H:'#818cf8',I:'#c084fc',J:'#f472b6',K:'#2dd4bf',L:'#facc15'};
 
 // [grupo, día, [equipo, códigoBandera, dueño], [equipo, códigoBandera, dueño]]
@@ -264,10 +283,41 @@ const content = document.getElementById('content');
 let view = 'grupo';
 let person = null;
 
-// results storage
+// results storage (Firebase = fuente; localStorage = caché para abrir rápido / sin conexión)
 let results = {};
 try{ results = JSON.parse(localStorage.getItem('qm2026')||'{}'); }catch(e){ results = {}; }
 function saveResults(){ try{ localStorage.setItem('qm2026', JSON.stringify(results)); }catch(e){} }
+
+// estos se reasignan cuando Firebase carga; si no carga, quedan en modo local
+let fbWrite = ()=>{};
+let fbClear = null;
+const writeTimers = {};
+function queueWrite(i, val){
+  clearTimeout(writeTimers[i]);
+  writeTimers[i] = setTimeout(()=> fbWrite(i, val), 350);
+}
+// llega un cambio remoto: actualizar datos y refrescar sin romper lo que el usuario escribe
+function onRemote(val){
+  results = val || {};
+  saveResults();
+  if(view==='grupo' || view==='dia'){
+    content.querySelectorAll('.card').forEach(card=>{
+      const r = results[card.dataset.i] || ['',''];
+      card.querySelectorAll('.score').forEach(inp=>{
+        if(document.activeElement!==inp){ inp.value = (inp.dataset.s==='a'? r[0] : r[1]) ?? ''; }
+      });
+      styleCard(card);
+    });
+  } else {
+    render();
+  }
+}
+function setStatus(mode){
+  const el=document.getElementById('syncstatus'); if(!el) return;
+  if(mode==='online'){ el.className='sync on'; el.textContent='● En vivo'; }
+  else if(mode==='local'){ el.className='sync off'; el.textContent='● Local (sin conexión)'; }
+  else { el.className='sync'; el.textContent='● Conectando…'; }
+}
 function outcome(i){
   const r = results[i];
   if(!r) return null;
@@ -401,7 +451,7 @@ function renderTabla(){
     <p class="tblnote"><span>${played} de 72 partidos con marcador. Puntos: 3 por victoria, 1 por empate. Cuenta los resultados de todas las selecciones de cada jugador.</span><button class="ghostbtn" id="reset">Borrar resultados</button></p>
     <div class="tblwrap"><table class="tbl"><thead><tr><th>#</th><th class="name">Jugador</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>GF:GC</th><th>DG</th><th>Pts</th></tr></thead><tbody>${body}</tbody></table></div>`;
   const rb=document.getElementById('reset');
-  rb.onclick=()=>{ if(confirm('¿Borrar todos los marcadores capturados en este navegador?')){ results={}; saveResults(); render(); } };
+  rb.onclick=()=>{ if(confirm('¿Borrar TODOS los marcadores para todos los jugadores?')){ results={}; saveResults(); if(fbClear) fbClear(); render(); } };
 }
 
 function render(){
@@ -418,32 +468,17 @@ content.addEventListener('input', e=>{
   const card = inp.closest('.card'); const i = card.dataset.i;
   const a = card.querySelector('.score[data-s="a"]').value;
   const b = card.querySelector('.score[data-s="b"]').value;
-  if(a===''&&b==='') delete results[i]; else results[i]=[a,b];
+  const val = (a===''&&b==='') ? null : [a,b];
+  if(val==null) delete results[i]; else results[i]=val;
   saveResults();
   styleCard(card);
+  queueWrite(i, val);
 });
 
-// chips
-const chipsEl=document.getElementById('chips');
-function buildChips(){
-  chipsEl.innerHTML='';
-  const all=document.createElement('button');
-  all.className='chip reset'+(person?'':' active'); all.textContent='Todos';
-  all.onclick=()=>{person=null;syncChips();render();};
-  chipsEl.appendChild(all);
-  people.forEach(n=>{
-    const c=document.createElement('button');
-    c.className='chip'+(person===n?' active':''); c.textContent=n; c.dataset.p=n;
-    c.onclick=()=>{person=(person===n?null:n);syncChips();render();};
-    chipsEl.appendChild(c);
-  });
-}
-function syncChips(){
-  chipsEl.querySelectorAll('.chip').forEach(c=>{
-    if(c.classList.contains('reset')) c.classList.toggle('active',!person);
-    else c.classList.toggle('active', c.dataset.p===person);
-  });
-}
+// player filter dropdown
+const psel=document.getElementById('psel');
+people.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; psel.appendChild(o); });
+psel.addEventListener('change', ()=>{ person = psel.value || null; render(); });
 
 // tabs
 document.getElementById('viewtabs').addEventListener('click',e=>{
@@ -453,8 +488,26 @@ document.getElementById('viewtabs').addEventListener('click',e=>{
   render();
 });
 
-buildChips();
 render();
+
+// ===== Conectar Firebase (con respaldo a modo local si no carga) =====
+setStatus('connecting');
+(async ()=>{
+  try{
+    const appMod = await import("https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js");
+    const dbMod  = await import("https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js");
+    const app = appMod.initializeApp(firebaseConfig);
+    const db  = dbMod.getDatabase(app);
+    const { ref, onValue, set, remove } = dbMod;
+    onValue(ref(db,'results'), snap => onRemote(snap.val()), err => { console.warn(err); setStatus('local'); });
+    fbWrite = (i,val)=>{ try{ if(val==null) remove(ref(db,'results/'+i)); else set(ref(db,'results/'+i), val); }catch(e){ console.warn(e); } };
+    fbClear = ()=>{ try{ remove(ref(db,'results')); }catch(e){ console.warn(e); } };
+    setStatus('online');
+  }catch(e){
+    console.warn('Firebase no disponible; modo local.', e);
+    setStatus('local');
+  }
+})();
 </script>
 </body>
 </html>
